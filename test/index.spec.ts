@@ -1,29 +1,20 @@
-import {
-	env,
-	createExecutionContext,
-	waitOnExecutionContext,
-	SELF,
-} from "cloudflare:test";
-import { describe, it, expect } from "vitest";
-import worker from "../src/index";
+import { SELF } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
 
-// For now, you'll need to do something like this to get a correctly-typed
-// `Request` to pass to `worker.fetch()`.
-const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
+describe('/api', () => {
+	it('solves HELLO_WORLD through the worker runtime', async () => {
+		const response = await SELF.fetch('https://example.com/api?challengeType=HELLO_WORLD', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'X-Interaction-Id': 'integration-test',
+			},
+			body: JSON.stringify({ name: 'Bob' }),
+		});
 
-describe("Hello World worker", () => {
-	it("responds with Hello World! (unit style)", async () => {
-		const request = new IncomingRequest("http://example.com");
- 		// Create an empty context to pass to `worker.fetch()`.
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		// Wait for all `Promise`s passed to `ctx.waitUntil()` to settle before running test assertions
-		await waitOnExecutionContext(ctx);
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
-	});
-
-	it("responds with Hello World! (integration style)", async () => {
-		const response = await SELF.fetch("https://example.com");
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			greeting: 'Hello Bob',
+		});
 	});
 });

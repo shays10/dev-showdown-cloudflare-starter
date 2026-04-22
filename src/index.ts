@@ -1,18 +1,73 @@
-/**
- * Welcome to Cloudflare Workers! This is your first worker.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your worker in action
- * - Run `npm run deploy` to publish your worker
- *
- * Bind resources to your worker in `wrangler.jsonc`. After adding bindings, a type definition for the
- * `Env` object can be regenerated with `npm run cf-typegen`.
- *
- * Learn more at https://developers.cloudflare.com/workers/
- */
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { generateText } from 'ai';
+
+const INTERACTION_ID_HEADER = 'X-Interaction-Id';
+
+type SolveEnv = Env & {
+	DEV_SHOWDOWN_API_KEY: string;
+};
 
 export default {
-	async fetch(request, env, ctx): Promise<Response> {
-		return new Response("Hello World!");
+	async fetch(request: Request, env: SolveEnv): Promise<Response> {
+		const url = new URL(request.url);
+
+		if (request.method !== 'POST' || url.pathname !== '/api') {
+			return new Response('Not Found', { status: 404 });
+		}
+
+		const challengeType = url.searchParams.get('challengeType');
+		if (!challengeType) {
+			return new Response('Missing challengeType query parameter', {
+				status: 400,
+			});
+		}
+
+		const interactionId = request.headers.get(INTERACTION_ID_HEADER);
+		if (!interactionId) {
+			return new Response(`Missing ${INTERACTION_ID_HEADER} header`, {
+				status: 400,
+			});
+		}
+
+		const payload = await request.json<any>();
+
+		switch (challengeType) {
+			case 'HELLO_WORLD':
+				return Response.json({
+					greeting: `Hello ${payload.name}`,
+				});
+			case 'BASIC_LLM': {
+				if (!env.DEV_SHOWDOWN_API_KEY) {
+					throw new Error('DEV_SHOWDOWN_API_KEY is required');
+				}
+
+				const workshopLlm = createWorkshopLlm(env.DEV_SHOWDOWN_API_KEY, interactionId);
+				const result = await generateText({
+					model: workshopLlm.chatModel('deli-4'),
+					system: 'You are a trivia question player. Answer the question correctly and concisely.',
+					prompt: payload.question,
+				});
+
+				return Response.json({
+					answer: result.text || 'N/A',
+				});
+			}
+			default:
+				return new Response('Solver not found', { status: 404 });
+		}
 	},
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<SolveEnv>;
+
+function createWorkshopLlm(apiKey: string, interactionId: string) {
+	const workshopLlm = createOpenAICompatible({
+		name: 'dev-showdown',
+		baseURL: 'https://devshowdown.com/v1',
+		supportsStructuredOutputs: true,
+		headers: {
+			Authorization: `Bearer ${apiKey}`,
+			[INTERACTION_ID_HEADER]: interactionId,
+		},
+	});
+
+	return workshopLlm;
+}
