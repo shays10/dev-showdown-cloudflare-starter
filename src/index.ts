@@ -3,12 +3,8 @@ import { generateText } from 'ai';
 
 const INTERACTION_ID_HEADER = 'X-Interaction-Id';
 
-type SolveEnv = Env & {
-	DEV_SHOWDOWN_API_KEY: string;
-};
-
 export default {
-	async fetch(request: Request, env: SolveEnv): Promise<Response> {
+	async fetch(request: Request, env: Env): Promise<Response> {
 		const url = new URL(request.url);
 
 		if (request.method !== 'POST' || url.pathname !== '/api') {
@@ -52,14 +48,14 @@ export default {
 					answer: result.text || 'N/A',
 				});
 			}
-			default:
-				return new Response('Solver not found', { status: 404 });
-		}
-	},
-} satisfies ExportedHandler<SolveEnv>;
+				default:
+					return new Response('Solver not found', { status: 404 });
+			}
+		},
+	} satisfies ExportedHandler<Env>;
 
 function createWorkshopLlm(apiKey: string, interactionId: string) {
-	const workshopLlm = createOpenAICompatible({
+	return createOpenAICompatible({
 		name: 'dev-showdown',
 		baseURL: 'https://devshowdown.com/v1',
 		supportsStructuredOutputs: true,
@@ -68,6 +64,4 @@ function createWorkshopLlm(apiKey: string, interactionId: string) {
 			[INTERACTION_ID_HEADER]: interactionId,
 		},
 	});
-
-	return workshopLlm;
 }
