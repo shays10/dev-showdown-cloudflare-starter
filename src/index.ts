@@ -112,6 +112,51 @@ export default {
 					answer: result.text || 'N/A',
 				});
 			}
+			case 'MULTI_DOCUMENT_KB_RETRIEVAL': {
+				if (!env.DEV_SHOWDOWN_API_KEY) {
+					throw new Error('DEV_SHOWDOWN_API_KEY is required');
+				}
+
+				const workshopLlm = createWorkshopLlm(env.DEV_SHOWDOWN_API_KEY, interactionId);
+				const result = await generateText({
+					model: workshopLlm.chatModel('deli-4'),
+					system:
+						'You answer questions about tech conferences, speakers, and events using a grep-like knowledge base search tool. ' +
+						'Strategy: extract distinctive keywords from the question (names, technologies, unusual phrases) and call searchKnowledgeBase. ' +
+						'The search is case-insensitive substring matching and returns up to 10 results. ' +
+						'If you get too many or zero results, refine the query: try shorter or more specific terms, or different phrasings. ' +
+						'Issue multiple searches if needed. Once you have relevant documents, answer concisely and factually based on them.',
+					prompt: payload.question,
+					stopWhen: stepCountIs(10),
+					tools: {
+						searchKnowledgeBase: tool({
+							description:
+								'Grep-like search over the knowledge base. Case-insensitive substring match. Returns up to 10 documents.',
+							inputSchema: z.object({
+								query: z.string().describe('The substring to search for in the knowledge base.'),
+							}),
+							execute: async ({ query }) => {
+								const res = await fetch('https://devshowdown.com/api/kb/search', {
+									method: 'POST',
+									headers: {
+										'Content-Type': 'application/json',
+										[INTERACTION_ID_HEADER]: interactionId,
+									},
+									body: JSON.stringify({ query }),
+								});
+								if (!res.ok) {
+									return { error: `Search API returned ${res.status}` };
+								}
+								return await res.json();
+							},
+						}),
+					},
+				});
+
+				return Response.json({
+					answer: result.text || 'N/A',
+				});
+			}
 			case 'SINGLE_DOCUMENT_KB_RETRIEVAL': {
 				if (!env.DEV_SHOWDOWN_API_KEY) {
 					throw new Error('DEV_SHOWDOWN_API_KEY is required');
