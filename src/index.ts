@@ -27,6 +27,9 @@ const productSchema = z.object({
 
 const INTERACTION_ID_HEADER = 'X-Interaction-Id';
 
+type ChatMessage = { role: 'user' | 'assistant'; content: string };
+const conversationHistory = new Map<string, ChatMessage[]>();
+
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
 		const url = new URL(request.url);
@@ -56,6 +59,31 @@ export default {
 				return Response.json({
 					greeting: `Hello ${payload.name}`,
 				});
+			case 'BASIC_CONVERSATION_AND_MEMORY': {
+				if (!env.DEV_SHOWDOWN_API_KEY) {
+					throw new Error('DEV_SHOWDOWN_API_KEY is required');
+				}
+
+				const history = conversationHistory.get(interactionId) ?? [];
+				history.push({ role: 'user', content: payload.message });
+
+				const workshopLlm = createWorkshopLlm(env.DEV_SHOWDOWN_API_KEY, interactionId);
+				const result = await generateText({
+					model: workshopLlm.chatModel('passo-2.5'),
+					system:
+						'You are a helpful assistant engaged in a multi-turn conversation about product details. ' +
+						'Users will share facts about products (prices, warranties, dimensions, etc.) over several turns, then ask you to compute totals or derived values based on everything shared so far. ' +
+						'Remember all details from previous messages in this conversation. ' +
+						'When asked for totals, show your arithmetic reasoning briefly and then give a concise natural-language answer that states the requested values (with units).',
+					messages: history,
+				});
+
+				const answer = result.text || 'N/A';
+				history.push({ role: 'assistant', content: answer });
+				conversationHistory.set(interactionId, history);
+
+				return Response.json({ answer });
+			}
 			case 'BASIC_LLM': {
 				if (!env.DEV_SHOWDOWN_API_KEY) {
 					throw new Error('DEV_SHOWDOWN_API_KEY is required');
