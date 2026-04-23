@@ -59,6 +59,127 @@ export default {
 				return Response.json({
 					greeting: `Hello ${payload.name}`,
 				});
+			case 'DYNAMIC_TOOL_ROUTING': {
+				if (!env.DEV_SHOWDOWN_API_KEY) {
+					throw new Error('DEV_SHOWDOWN_API_KEY is required');
+				}
+
+				const issueTypeEnum = z.enum([
+					'DUPLICATE_CHARGE',
+					'LOGIN_LOCKOUT',
+					'COUPON_REJECTED',
+					'WORKSPACE_LOCKED',
+				]);
+				const rootCauseEnum = z.enum([
+					'DUPLICATE_CAPTURE_RETRY',
+					'EMAIL_CHANGE_PENDING',
+					'COUPON_PLAN_RESTRICTION',
+					'PAYMENT_PAST_DUE',
+				]);
+				const toolNameEnum = z.enum([
+					'account',
+					'payments',
+					'invoices',
+					'workspace',
+					'auth',
+					'coupon',
+					'policy',
+				]);
+
+				const actionSchema = z.discriminatedUnion('action', [
+					z.object({
+						action: z.literal('callTool'),
+						tool: toolNameEnum,
+						issueType: issueTypeEnum
+							.optional()
+							.describe('Only required when tool is "policy".'),
+					}),
+					z.object({
+						action: z.literal('finalAnswer'),
+						issueType: issueTypeEnum,
+						rootCause: rootCauseEnum,
+						recommendedAction: z.string(),
+						evidence: z.string().describe('One concrete clue taken from tool output.'),
+					}),
+				]);
+
+				const system =
+					'You are a support triage agent. Given an ambiguous user message and an accountId, you must determine issueType, rootCause, recommendedAction, and evidence. ' +
+					'On each turn, either call ONE internal tool to gather more signal, or emit a finalAnswer. ' +
+					'Available tools (call by short name):\n' +
+					'- account, payments, invoices, workspace, auth, coupon: each takes the accountId and returns account-specific data.\n' +
+					'- policy: takes an issueType and returns the recommended support action.\n' +
+					'Routing strategy: read the user message for hints (e.g. "login" → auth; "charge/refund/invoice" → payments/invoices; "coupon/discount" → coupon; "workspace/locked" → workspace; "email changed" → auth). ' +
+					'Call additional tools if the first result is inconclusive. ' +
+					'Always call the policy tool once you have settled on an issueType so that recommendedAction matches the official policy text. ' +
+					'The evidence field must quote or paraphrase a concrete fact from a tool result, not from the user message.';
+
+				const messages: { role: 'user' | 'assistant'; content: string }[] = [
+					{
+						role: 'user',
+						content: `accountId: ${payload.accountId}\n\nUser message: ${payload.message}`,
+					},
+				];
+
+				const workshopLlm = createWorkshopLlm(env.DEV_SHOWDOWN_API_KEY, interactionId);
+				const model = workshopLlm.chatModel('passo-2.5');
+
+				const callSupportTool = async (
+					tool: z.infer<typeof toolNameEnum>,
+					issueType?: string,
+				) => {
+					const qs =
+						tool === 'policy'
+							? `issueType=${encodeURIComponent(issueType ?? '')}`
+							: `accountId=${encodeURIComponent(payload.accountId)}`;
+					const res = await fetch(`https://devshowdown.com/api/support/${tool}?${qs}`, {
+						headers: { [INTERACTION_ID_HEADER]: interactionId },
+					});
+					if (!res.ok) {
+						return { error: `Tool ${tool} returned ${res.status}` };
+					}
+					return await res.json();
+				};
+
+				let finalAnswer: {
+					issueType: z.infer<typeof issueTypeEnum>;
+					rootCause: z.infer<typeof rootCauseEnum>;
+					recommendedAction: string;
+					evidence: string;
+				} | null = null;
+
+				for (let step = 0; step < 8; step++) {
+					const { object } = await generateObject({
+						model,
+						schema: actionSchema,
+						system,
+						messages,
+					});
+
+					if (object.action === 'finalAnswer') {
+						finalAnswer = {
+							issueType: object.issueType,
+							rootCause: object.rootCause,
+							recommendedAction: object.recommendedAction,
+							evidence: object.evidence,
+						};
+						break;
+					}
+
+					const toolResult = await callSupportTool(object.tool, object.issueType);
+					messages.push({ role: 'assistant', content: JSON.stringify(object) });
+					messages.push({
+						role: 'user',
+						content: `Tool "${object.tool}"${object.issueType ? ` (issueType=${object.issueType})` : ''} returned:\n${JSON.stringify(toolResult)}\n\nEither call another tool or emit finalAnswer.`,
+					});
+				}
+
+				if (!finalAnswer) {
+					return new Response('Agent did not reach a final answer', { status: 500 });
+				}
+
+				return Response.json(finalAnswer);
+			}
 			case 'BASIC_CONVERSATION_AND_MEMORY': {
 				if (!env.DEV_SHOWDOWN_API_KEY) {
 					throw new Error('DEV_SHOWDOWN_API_KEY is required');
