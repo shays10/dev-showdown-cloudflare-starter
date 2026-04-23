@@ -112,6 +112,35 @@ export default {
 					answer: result.text || 'N/A',
 				});
 			}
+			case 'SINGLE_DOCUMENT_KB_RETRIEVAL': {
+				if (!env.DEV_SHOWDOWN_API_KEY) {
+					throw new Error('DEV_SHOWDOWN_API_KEY is required');
+				}
+
+				const docRes = await fetch('https://devshowdown.com/api/kb/document', {
+					headers: {
+						[INTERACTION_ID_HEADER]: interactionId,
+					},
+				});
+				if (!docRes.ok) {
+					return new Response(`Failed to fetch knowledge base document: ${docRes.status}`, {
+						status: 502,
+					});
+				}
+				const document = await docRes.text();
+
+				const workshopLlm = createWorkshopLlm(env.DEV_SHOWDOWN_API_KEY, interactionId);
+				const result = await generateText({
+					model: workshopLlm.chatModel('deli-4'),
+					system:
+						'You answer questions strictly based on the provided knowledge base document. Be concise and factual. If the answer is not in the document, say so.',
+					prompt: `Knowledge base document:\n\n${document}\n\nQuestion: ${payload.question}`,
+				});
+
+				return Response.json({
+					answer: result.text || 'N/A',
+				});
+			}
 			case 'RESPONSE_STREAMING': {
 				if (!env.DEV_SHOWDOWN_API_KEY) {
 					throw new Error('DEV_SHOWDOWN_API_KEY is required');
