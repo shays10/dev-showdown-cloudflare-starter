@@ -1,5 +1,5 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { generateObject, generateText, stepCountIs, tool } from 'ai';
+import { generateObject, generateText, stepCountIs, streamText, tool } from 'ai';
 import { z } from 'zod';
 
 const productSchema = z.object({
@@ -111,6 +111,19 @@ export default {
 				return Response.json({
 					answer: result.text || 'N/A',
 				});
+			}
+			case 'RESPONSE_STREAMING': {
+				if (!env.DEV_SHOWDOWN_API_KEY) {
+					throw new Error('DEV_SHOWDOWN_API_KEY is required');
+				}
+
+				const workshopLlm = createWorkshopLlm(env.DEV_SHOWDOWN_API_KEY, interactionId);
+				const result = streamText({
+					model: workshopLlm.chatModel('deli-4'),
+					prompt: payload.prompt,
+				});
+
+				return result.toTextStreamResponse();
 			}
 			case 'JSON_MODE': {
 				if (!env.DEV_SHOWDOWN_API_KEY) {
