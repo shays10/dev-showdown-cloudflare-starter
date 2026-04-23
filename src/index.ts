@@ -119,13 +119,18 @@ export default {
 
 				const workshopLlm = createWorkshopLlm(env.DEV_SHOWDOWN_API_KEY, interactionId);
 				const result = await generateText({
-					model: workshopLlm.chatModel('deli-4'),
+					model: workshopLlm.chatModel('passo-2.5'),
 					system:
-						'You answer questions about tech conferences, speakers, and events using a grep-like knowledge base search tool. ' +
-						'Strategy: extract distinctive keywords from the question (names, technologies, unusual phrases) and call searchKnowledgeBase. ' +
-						'The search is case-insensitive substring matching and returns up to 10 results. ' +
-						'If you get too many or zero results, refine the query: try shorter or more specific terms, or different phrasings. ' +
-						'Issue multiple searches if needed. Once you have relevant documents, answer concisely and factually based on them.',
+						'You answer questions about tech conferences, speakers, and events by calling the searchKnowledgeBase tool. ' +
+						'IMPORTANT — the tool is LITERAL case-insensitive SUBSTRING grep (like ripgrep), NOT semantic search. ' +
+						'A query only matches documents that contain that exact substring verbatim. ' +
+						'Rules for queries:\n' +
+						'- Prefer ONE short, distinctive token per search: a proper noun, a handle (e.g. @dachfest), a product name, or a conference name.\n' +
+						'- NEVER use multi-word descriptive phrases like "closing keynote about technology" — those will almost never match.\n' +
+						'- If a query returns 0 results, try a SHORTER or DIFFERENT single token (e.g. drop adjectives, try the conference name alone, try a plausible speaker first name).\n' +
+						'- If a query returns too many results, add ONE more distinctive token only if you know it appears verbatim.\n' +
+						'- Up to 10 results are returned per search. Read them all before deciding the next step.\n' +
+						'Issue as many searches as needed. Once the relevant document(s) are identified, answer in one concise factual sentence grounded in the retrieved text.',
 					prompt: payload.question,
 					stopWhen: stepCountIs(10),
 					tools: {
